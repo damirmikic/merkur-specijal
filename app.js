@@ -258,10 +258,16 @@ function displayOdds(data) {
 
     try {
         // Parse markets and outcomes
-        const markets = parseMarkets(data);
+        const allMarkets = parseMarkets(data);
+
+        // FILTER: Only show markets that contain "Player" or are "Anytime Goalscorer"
+        const markets = allMarkets.filter(market => {
+            const marketName = (market.name || '').toLowerCase();
+            return marketName.includes('player') || marketName.includes('anytime goalscorer');
+        });
 
         if (markets.length === 0) {
-            oddsContainer.innerHTML = '<div class="no-data">No betting markets available for this event</div>';
+            oddsContainer.innerHTML = '<div class="no-data">No player betting markets available for this event</div>';
             return;
         }
 
