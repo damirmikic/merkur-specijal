@@ -5,6 +5,7 @@ const ODDS_API_BASE = '/.netlify/functions/get-odds';
 // State
 let events = [];
 let currentEventData = null;
+let currentMarkets = []; // Store parsed markets for filtering
 
 // DOM Elements
 const loadEventsBtn = document.getElementById('loadEventsBtn');
@@ -249,6 +250,10 @@ async function loadOdds(eventId) {
 // Display odds
 function displayOdds(data) {
     oddsContainer.innerHTML = '';
+    
+    // Clear any existing player filter
+    const existingFilter = document.getElementById('playerFilterContainer');
+    if(existingFilter) existingFilter.remove();
 
     // Display event information
     const eventInfo = createEventInfo();
@@ -260,27 +265,172 @@ function displayOdds(data) {
         // Parse markets and outcomes
         const allMarkets = parseMarkets(data);
 
-        // FILTER: Only show markets that contain "Player" or are "Anytime Goalscorer"
-        const markets = allMarkets.filter(market => {
+        // FILTER: Only show markets that contain "Player", "Goalscorer" or "Score" (for things like "To Score...")
+        currentMarkets = allMarkets.filter(market => {
             const marketName = (market.name || '').toLowerCase();
-            return marketName.includes('player') || marketName.includes('anytime goalscorer');
+            return marketName.includes('player') || 
+                   marketName.includes('goalscorer') || 
+                   marketName.includes('score');
         });
 
-        if (markets.length === 0) {
-            oddsContainer.innerHTML = '<div class="no-data">No player betting markets available for this event</div>';
+        if (currentMarkets.length === 0) {
+            const noDiv = document.createElement('div');
+            noDiv.className = 'no-data';
+            noDiv.textContent = 'No player betting markets available for this event';
+            oddsContainer.appendChild(noDiv);
             return;
         }
 
-        // Display each market
-        markets.forEach(market => {
-            const marketCard = createMarketCard(market);
-            oddsContainer.appendChild(marketCard);
-        });
+        // Setup the Player Filter Dropdown
+        setupPlayerFilter(currentMarkets);
+
+        // Display markets (initially show all filtered player markets)
+        renderMarkets(currentMarkets);
 
     } catch (error) {
         console.error('Error displaying odds:', error);
-        oddsContainer.innerHTML = '<div class="no-data">Error displaying odds data</div>';
+        const errDiv = document.createElement('div');
+        errDiv.className = 'no-data';
+        errDiv.textContent = 'Error displaying odds data';
+        oddsContainer.appendChild(errDiv);
     }
+}
+
+// Create and setup the player filter dropdown
+function setupPlayerFilter(markets) {
+    // Container for the filter
+    const filterContainer = document.createElement('div');
+    filterContainer.id = 'playerFilterContainer';
+    filterContainer.style.marginBottom = '20px';
+    filterContainer.style.padding = '10px';
+    filterContainer.style.backgroundColor = '#f8f9fa';
+    filterContainer.style.borderRadius = '5px';
+    filterContainer.style.border = '1px solid #dee2e6';
+
+    const label = document.createElement('label');
+    label.textContent = 'Filter by Player: ';
+    label.style.marginRight = '10px';
+    label.style.fontWeight = 'bold';
+    
+    const select = document.createElement('select');
+    select.id = 'playerSelect';
+    select.style.padding = '5px';
+    select.style.borderRadius = '4px';
+
+    // Extract unique player names
+    const players = new Set();
+    markets.forEach(market => {
+        market.outcomes.forEach(outcome => {
+            const name = outcome.name;
+            // Filter out generic outcomes to find real player names
+            // Exclude Over/Under, Yes/No, and generic "No Goalscorer"
+            if (name && 
+                !['Over', 'Under', 'Yes', 'No'].includes(name) && 
+                !name.includes('No Goalscorer') &&
+                !name.includes('None') &&
+                !name.includes('Draw')) {
+                // If it's a name like "Salah to Score", we ideally want just "Salah", 
+                // but usually outcomes in these markets ARE the player name (e.g. "Mohamed Salah")
+                players.add(name);
+            }
+        });
+    });
+
+    // Sort players alphabetically
+    const sortedPlayers = Array.from(players).sort();
+
+    // Default option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = 'all';
+    defaultOption.textContent = '-- All Players --';
+    select.appendChild(defaultOption);
+
+    // Player options
+    sortedPlayers.forEach(player => {
+        const option = document.createElement('option');
+        option.value = player;
+        option.textContent = player;
+        select.appendChild(option);
+    });
+
+    // Add event listener
+    select.addEventListener('change', (e) => {
+        filterAndRenderMarkets(e.target.value);
+    });
+
+    filterContainer.appendChild(label);
+    filterContainer.appendChild(select);
+
+    // Insert before the markets list but after event info (handled by inserting at top of oddsContainer essentially via helper logic usually, but here we insert before oddsContainer in DOM or append to oddsContainer?)
+    // current logic appends event info to oddsContainer. Let's insert this filter after event info.
+    // The safest way given the structure is to insert it into oddsSection before oddsContainer
+    oddsSection.insertBefore(filterContainer, oddsContainer);
+}
+
+// Filter markets based on selected player and render
+function filterAndRenderMarkets(playerName) {
+    // Clear existing markets from container (keep Event Info if we want, but simpler to rebuild or targeting just markets)
+    // To identify markets vs info, we can clear everything and rebuild.
+    oddsContainer.innerHTML = '';
+    
+    // Re-append event info
+    const eventInfo = createEventInfo();
+    if (eventInfo) {
+        oddsContainer.appendChild(eventInfo);
+    }
+
+    if (playerName === 'all') {
+        renderMarkets(currentMarkets);
+        return;
+    }
+
+    const filteredMarkets = [];
+
+    currentMarkets.forEach(market => {
+        // We want to show this market if:
+        // 1. The Market Name contains the player name (e.g. "Mohamed Salah Total Shots")
+        // 2. OR One of the outcomes matches the player name
+        
+        const marketNameLower = market.name.toLowerCase();
+        const playerLower = playerName.toLowerCase();
+        
+        const isPlayerSpecificMarket = marketNameLower.includes(playerLower);
+
+        if (isPlayerSpecificMarket) {
+            // Include the whole market (all outcomes, usually Yes/No or Over/Under)
+            filteredMarkets.push(market);
+        } else {
+            // Check outcomes for the player
+            const matchingOutcomes = market.outcomes.filter(outcome => 
+                outcome.name === playerName
+            );
+
+            if (matchingOutcomes.length > 0) {
+                // Clone market to not affect original state, but only with matching outcomes
+                filteredMarkets.push({
+                    ...market,
+                    outcomes: matchingOutcomes
+                });
+            }
+        }
+    });
+
+    if (filteredMarkets.length === 0) {
+        const noData = document.createElement('div');
+        noData.className = 'no-data';
+        noData.textContent = `No markets available for ${playerName}`;
+        oddsContainer.appendChild(noData);
+    } else {
+        renderMarkets(filteredMarkets);
+    }
+}
+
+// Render a list of markets
+function renderMarkets(markets) {
+    markets.forEach(market => {
+        const marketCard = createMarketCard(market);
+        oddsContainer.appendChild(marketCard);
+    });
 }
 
 // Create event info display
