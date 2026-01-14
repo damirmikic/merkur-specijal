@@ -265,12 +265,22 @@ function displayOdds(data) {
         // Parse markets and outcomes
         const allMarkets = parseMarkets(data);
 
-        // FILTER: Only show markets that contain "Player", "Goalscorer" or "Score" (for things like "To Score...")
+        // FILTER: Keep only markets related to players (Goalscorers, Player Stats, etc.)
+        // Exclude generic team/match markets like "Correct Score", "Both Teams To Score"
         currentMarkets = allMarkets.filter(market => {
-            const marketName = (market.name || '').toLowerCase();
-            return marketName.includes('player') || 
-                   marketName.includes('goalscorer') || 
-                   marketName.includes('score');
+            const name = (market.name || '').toLowerCase();
+            const isPlayerRelated = name.includes('player') || 
+                                    name.includes('goalscorer') || 
+                                    name.includes('scorer') ||
+                                    name.includes('to score');
+            
+            const isExcluded = name.includes('correct score') || 
+                               name.includes('both teams') ||
+                               name.includes('team to score') || // "First Team to Score"
+                               name.includes('half time') ||
+                               name.includes('handicap');
+            
+            return isPlayerRelated && !isExcluded;
         });
 
         if (currentMarkets.length === 0) {
@@ -284,8 +294,14 @@ function displayOdds(data) {
         // Setup the Player Filter Dropdown
         setupPlayerFilter(currentMarkets);
 
-        // Display markets (initially show all filtered player markets)
-        renderMarkets(currentMarkets);
+        // Show instruction message initially
+        const instructDiv = document.createElement('div');
+        instructDiv.id = 'selectPlayerMsg';
+        instructDiv.className = 'no-data';
+        instructDiv.style.backgroundColor = '#e9ecef';
+        instructDiv.style.color = '#495057';
+        instructDiv.textContent = 'Please select a player from the dropdown to view odds.';
+        oddsContainer.appendChild(instructDiv);
 
     } catch (error) {
         console.error('Error displaying odds:', error);
@@ -298,54 +314,62 @@ function displayOdds(data) {
 
 // Create and setup the player filter dropdown
 function setupPlayerFilter(markets) {
-    // Container for the filter
     const filterContainer = document.createElement('div');
     filterContainer.id = 'playerFilterContainer';
     filterContainer.style.marginBottom = '20px';
-    filterContainer.style.padding = '10px';
+    filterContainer.style.padding = '15px';
     filterContainer.style.backgroundColor = '#f8f9fa';
-    filterContainer.style.borderRadius = '5px';
+    filterContainer.style.borderRadius = '8px';
     filterContainer.style.border = '1px solid #dee2e6';
+    filterContainer.style.display = 'flex';
+    filterContainer.style.alignItems = 'center';
 
     const label = document.createElement('label');
-    label.textContent = 'Filter by Player: ';
+    label.textContent = 'Select Player: ';
     label.style.marginRight = '10px';
     label.style.fontWeight = 'bold';
+    label.style.color = '#333';
     
     const select = document.createElement('select');
     select.id = 'playerSelect';
-    select.style.padding = '5px';
+    select.style.padding = '8px';
     select.style.borderRadius = '4px';
+    select.style.border = '1px solid #ced4da';
+    select.style.flexGrow = '1';
+    select.style.maxWidth = '300px';
 
     // Extract unique player names
     const players = new Set();
+    const excludeTerms = [
+        'over', 'under', 'yes', 'no', 'draw', 'none', 'odd', 'even', 
+        'no goalscorer', 'neither', 'home', 'away', 'tie'
+    ];
+
     markets.forEach(market => {
+        // Method 1: Check outcomes for player names (e.g. "Mohamed Salah" in "First Goalscorer")
         market.outcomes.forEach(outcome => {
             const name = outcome.name;
-            // Filter out generic outcomes to find real player names
-            // Exclude Over/Under, Yes/No, and generic "No Goalscorer"
-            if (name && 
-                !['Over', 'Under', 'Yes', 'No'].includes(name) && 
-                !name.includes('No Goalscorer') &&
-                !name.includes('None') &&
-                !name.includes('Draw')) {
-                // If it's a name like "Salah to Score", we ideally want just "Salah", 
-                // but usually outcomes in these markets ARE the player name (e.g. "Mohamed Salah")
-                players.add(name);
+            if (name) {
+                const nameLower = name.toLowerCase();
+                const isGeneric = excludeTerms.some(term => nameLower === term || nameLower.startsWith(term + ' '));
+                // Ensure it looks like a name (not a number or short code)
+                const isName = name.length > 2 && !/^\d/.test(name);
+                
+                if (!isGeneric && isName) {
+                    players.add(name);
+                }
             }
         });
     });
 
-    // Sort players alphabetically
     const sortedPlayers = Array.from(players).sort();
 
     // Default option
     const defaultOption = document.createElement('option');
-    defaultOption.value = 'all';
-    defaultOption.textContent = '-- All Players --';
+    defaultOption.value = '';
+    defaultOption.textContent = '-- Select a Player --';
     select.appendChild(defaultOption);
 
-    // Player options
     sortedPlayers.forEach(player => {
         const option = document.createElement('option');
         option.value = player;
@@ -353,7 +377,6 @@ function setupPlayerFilter(markets) {
         select.appendChild(option);
     });
 
-    // Add event listener
     select.addEventListener('change', (e) => {
         filterAndRenderMarkets(e.target.value);
     });
@@ -361,16 +384,11 @@ function setupPlayerFilter(markets) {
     filterContainer.appendChild(label);
     filterContainer.appendChild(select);
 
-    // Insert before the markets list but after event info (handled by inserting at top of oddsContainer essentially via helper logic usually, but here we insert before oddsContainer in DOM or append to oddsContainer?)
-    // current logic appends event info to oddsContainer. Let's insert this filter after event info.
-    // The safest way given the structure is to insert it into oddsSection before oddsContainer
     oddsSection.insertBefore(filterContainer, oddsContainer);
 }
 
 // Filter markets based on selected player and render
 function filterAndRenderMarkets(playerName) {
-    // Clear existing markets from container (keep Event Info if we want, but simpler to rebuild or targeting just markets)
-    // To identify markets vs info, we can clear everything and rebuild.
     oddsContainer.innerHTML = '';
     
     // Re-append event info
@@ -379,34 +397,35 @@ function filterAndRenderMarkets(playerName) {
         oddsContainer.appendChild(eventInfo);
     }
 
-    if (playerName === 'all') {
-        renderMarkets(currentMarkets);
+    if (!playerName) {
+        const instructDiv = document.createElement('div');
+        instructDiv.className = 'no-data';
+        instructDiv.textContent = 'Please select a player to view odds.';
+        oddsContainer.appendChild(instructDiv);
         return;
     }
 
     const filteredMarkets = [];
+    const playerLower = playerName.toLowerCase();
 
     currentMarkets.forEach(market => {
-        // We want to show this market if:
-        // 1. The Market Name contains the player name (e.g. "Mohamed Salah Total Shots")
-        // 2. OR One of the outcomes matches the player name
-        
         const marketNameLower = market.name.toLowerCase();
-        const playerLower = playerName.toLowerCase();
         
-        const isPlayerSpecificMarket = marketNameLower.includes(playerLower);
-
-        if (isPlayerSpecificMarket) {
-            // Include the whole market (all outcomes, usually Yes/No or Over/Under)
+        // Logic:
+        // 1. If Market Name contains Player Name -> Show entire market (e.g. "Mohamed Salah Shots")
+        // 2. If Outcomes contain Player Name -> Show ONLY that outcome (e.g. "First Goalscorer" -> "Mohamed Salah")
+        
+        if (marketNameLower.includes(playerLower)) {
             filteredMarkets.push(market);
         } else {
-            // Check outcomes for the player
-            const matchingOutcomes = market.outcomes.filter(outcome => 
-                outcome.name === playerName
-            );
+            // Find outcomes that strictly match the player name or contain it (e.g. "Mohamed Salah to score")
+            const matchingOutcomes = market.outcomes.filter(outcome => {
+                const outcomeNameLower = outcome.name.toLowerCase();
+                return outcomeNameLower.includes(playerLower);
+            });
 
             if (matchingOutcomes.length > 0) {
-                // Clone market to not affect original state, but only with matching outcomes
+                // Create a shallow copy of the market with specific outcomes
                 filteredMarkets.push({
                     ...market,
                     outcomes: matchingOutcomes
@@ -418,7 +437,7 @@ function filterAndRenderMarkets(playerName) {
     if (filteredMarkets.length === 0) {
         const noData = document.createElement('div');
         noData.className = 'no-data';
-        noData.textContent = `No markets available for ${playerName}`;
+        noData.textContent = `No odds available for ${playerName}`;
         oddsContainer.appendChild(noData);
     } else {
         renderMarkets(filteredMarkets);
@@ -462,23 +481,18 @@ function parseMarkets(data) {
     try {
         // 1. Handle Ladbrokes/OpenBet SSResponse structure (nested children)
         if (data.SSResponse && data.SSResponse.children) {
-            // Find the event node within the children array
             const eventNode = data.SSResponse.children.find(child => child.event);
             
             if (eventNode && eventNode.event && eventNode.event.children) {
-                // Iterate over the children of the event to find markets
                 eventNode.event.children.forEach(child => {
                     if (child.market) {
                         const rawMarket = child.market;
-                        
-                        // Create a clean market object
                         const market = {
                             id: rawMarket.id,
                             name: rawMarket.name,
                             outcomes: []
                         };
 
-                        // Process outcomes if they exist in the market's children
                         if (rawMarket.children) {
                             rawMarket.children.forEach(outcomeNode => {
                                 if (outcomeNode.outcome) {
@@ -486,17 +500,14 @@ function parseMarkets(data) {
                                     const outcome = {
                                         name: rawOutcome.name,
                                         id: rawOutcome.id,
-                                        ...rawOutcome // Keep other properties
+                                        ...rawOutcome
                                     };
 
-                                    // Extract price/odds from the nested children array of the outcome
                                     if (rawOutcome.children) {
                                         const priceNode = rawOutcome.children.find(c => c.price);
                                         if (priceNode && priceNode.price) {
-                                            // Assign decimal odds to 'odds' property for the display function
-                                            // Prefer priceDec, otherwise other formats if needed
                                             outcome.odds = parseFloat(priceNode.price.priceDec);
-                                            outcome.price = priceNode.price; // Keep raw price obj just in case
+                                            outcome.price = priceNode.price;
                                         }
                                     }
                                     market.outcomes.push(outcome);
@@ -507,23 +518,14 @@ function parseMarkets(data) {
                     }
                 });
                 
-                // Return immediately if we found markets in this structure
-                if (marketsList.length > 0) {
-                    return marketsList;
-                }
+                if (marketsList.length > 0) return marketsList;
             }
         }
 
-        // 2. Fallback: Handle other possible response structures (Standard JSONs)
-        if (data.markets && Array.isArray(data.markets)) {
-            return data.markets;
-        }
+        // 2. Fallback: Standard JSON structures
+        if (data.markets && Array.isArray(data.markets)) return data.markets;
+        if (data.data && data.data.markets) return Array.isArray(data.data.markets) ? data.data.markets : [data.data.markets];
 
-        if (data.data && data.data.markets) {
-            return Array.isArray(data.data.markets) ? data.data.markets : [data.data.markets];
-        }
-
-        // Look for outcome structures at root
         if (data.outcomes || data.selections) {
             return [{
                 name: 'Main Market',
@@ -532,17 +534,12 @@ function parseMarkets(data) {
             }];
         }
 
-        // Try to find markets in nested generic structures
+        // Generic fallback traversal
         for (const key in data) {
             if (data[key] && typeof data[key] === 'object') {
-                if (data[key].markets) {
-                    return Array.isArray(data[key].markets) ? data[key].markets : [data[key].markets];
-                }
+                if (data[key].markets) return Array.isArray(data[key].markets) ? data[key].markets : [data[key].markets];
                 if (Array.isArray(data[key]) && data[key].length > 0) {
-                    const firstItem = data[key][0];
-                    if (firstItem.outcomes || firstItem.selections || firstItem.name) {
-                        return data[key];
-                    }
+                    if (data[key][0].outcomes || data[key][0].selections || data[key][0].name) return data[key];
                 }
             }
         }
@@ -599,7 +596,6 @@ function createOutcomeCard(outcome) {
 
 // Format odds
 function formatOdds(outcome) {
-    // Try different possible odds fields
     const oddsValue = outcome.odds ||
                      outcome.price ||
                      outcome.decimal_odds ||
@@ -608,27 +604,15 @@ function formatOdds(outcome) {
                      outcome.fractionalOdds;
 
     if (oddsValue) {
-        // If it's a decimal
         if (typeof oddsValue === 'number') {
             return oddsValue.toFixed(2);
         }
-        // If string, return as is (parseMarkets logic ensures decimal strings are handled)
         return oddsValue;
     }
 
-    // Try to find odds in nested structures
-    if (outcome.price_data) {
-        return formatOdds(outcome.price_data);
-    }
-
-    if (outcome.odds_data) {
-        return formatOdds(outcome.odds_data);
-    }
-
-    // Last resort check for price object created in parseMarkets
-    if (outcome.price && outcome.price.priceDec) {
-        return outcome.price.priceDec;
-    }
+    if (outcome.price_data) return formatOdds(outcome.price_data);
+    if (outcome.odds_data) return formatOdds(outcome.odds_data);
+    if (outcome.price && outcome.price.priceDec) return outcome.price.priceDec;
 
     return 'N/A';
 }
