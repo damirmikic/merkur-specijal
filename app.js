@@ -6,7 +6,8 @@ const ODDS_API_BASE = '/.netlify/functions/get-odds';
 let events = [];
 let currentEventData = null;
 let currentMarkets = [];
-let csvExportData = []; // Store data for CSV export
+let csvExportData = {}; // Store data for CSV export by player
+let selectedClub = '';
 
 // DOM Elements
 const loadEventsBtn = document.getElementById('loadEventsBtn');
@@ -84,8 +85,8 @@ async function loadEvents() {
         populateEventDropdown();
         showElement(eventSection);
         
-        // Setup CSV Download Button if not already present
-        setupCsvButton();
+        // Setup CSV Controls if not already present
+        setupCsvControls();
 
     } catch (error) {
         console.error('Error:', error);
@@ -125,11 +126,12 @@ function populateEventDropdown() {
 
 function formatDate(dateString) {
     try {
-        return new Date(dateString).toLocaleString('en-GB', {
-            day: '2-digit', month: '2-digit', year: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
-    } catch { return dateString; }
+        const date = new Date(dateString);
+        return {
+            date: date.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'),
+            time: date.toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit' })
+        };
+    } catch { return { date: '', time: '' }; }
 }
 
 async function handleEventSelection(e) {
@@ -142,7 +144,32 @@ async function handleEventSelection(e) {
     }
 
     currentEventData = JSON.parse(selectedOption.dataset.event);
+    
+    // Reset state
+    csvExportData = {};
+    updateCsvButtonCount();
+    
+    // Update Club Selector options based on event name (assuming "Home v Away" format)
+    updateClubSelector();
+
     await loadOdds(eventId);
+}
+
+function updateClubSelector() {
+    const clubSelect = document.getElementById('clubSelect');
+    if (!clubSelect || !currentEventData) return;
+    
+    clubSelect.innerHTML = '<option value="">-- Select Club for CSV --</option>';
+    
+    const eventName = currentEventData.name || currentEventData.eventName || '';
+    if (eventName.includes(' v ')) {
+        const [home, away] = eventName.split(' v ');
+        if (home) clubSelect.add(new Option(home, home));
+        if (away) clubSelect.add(new Option(away, away));
+    } else {
+        // Fallback or just add the event name
+         clubSelect.add(new Option(eventName, eventName));
+    }
 }
 
 async function loadOdds(eventId) {
@@ -168,37 +195,53 @@ async function loadOdds(eventId) {
     }
 }
 
-// Setup CSV Download Button in the controls area
-function setupCsvButton() {
-    let btnContainer = document.getElementById('downloadCsvContainer');
-    if (!btnContainer) {
-        btnContainer = document.createElement('div');
-        btnContainer.id = 'downloadCsvContainer';
+// Setup CSV Controls
+function setupCsvControls() {
+    let controlsContainer = document.getElementById('csvControlsContainer');
+    if (!controlsContainer) {
+        controlsContainer = document.createElement('div');
+        controlsContainer.id = 'csvControlsContainer';
+        controlsContainer.style.display = 'flex';
+        controlsContainer.style.gap = '10px';
+        controlsContainer.style.alignItems = 'center';
+        controlsContainer.style.marginLeft = 'auto'; // push to right
+
+        // Club Selector
+        const clubSelect = document.createElement('select');
+        clubSelect.id = 'clubSelect';
+        clubSelect.innerHTML = '<option value="">-- Select Club for CSV --</option>';
+        clubSelect.onchange = (e) => { selectedClub = e.target.value; };
         
+        // Download Button
         const btn = document.createElement('button');
         btn.id = 'downloadCsvBtn';
         btn.textContent = 'Download CSV (0)';
+        btn.style.backgroundColor = '#ed8936'; // orange
         btn.onclick = downloadCSV;
         
-        btnContainer.appendChild(btn);
+        controlsContainer.appendChild(clubSelect);
+        controlsContainer.appendChild(btn);
         
-        // Append next to load button
         const controls = document.querySelector('.controls');
-        controls.appendChild(btnContainer);
+        controls.appendChild(controlsContainer);
     }
 }
 
 function updateCsvButtonCount() {
     const btn = document.getElementById('downloadCsvBtn');
     if (btn) {
-        btn.textContent = `Download CSV (${csvExportData.length})`;
+        // Count total markets across all players
+        let count = 0;
+        for (const player in csvExportData) {
+            count += csvExportData[player].length;
+        }
+        btn.textContent = `Download CSV (${count})`;
     }
 }
 
 function displayOdds(data) {
     oddsContainer.innerHTML = '';
     
-    // Clear existing filter
     const existingFilter = document.getElementById('playerFilterContainer');
     if(existingFilter) existingFilter.remove();
 
@@ -208,7 +251,7 @@ function displayOdds(data) {
     try {
         const allMarkets = parseMarkets(data);
 
-        // FILTER: Keep only Player related markets
+        // FILTER: Player related only
         currentMarkets = allMarkets.filter(market => {
             const name = (market.name || '').toLowerCase();
             const isPlayerRelated = name.includes('player') || 
@@ -226,13 +269,12 @@ function displayOdds(data) {
         });
 
         if (currentMarkets.length === 0) {
-            oddsContainer.innerHTML += '<div class="no-data">No player betting markets available for this event</div>';
+            oddsContainer.innerHTML += '<div class="no-data">No player betting markets available</div>';
             return;
         }
 
         setupPlayerFilter(currentMarkets);
 
-        // Initial instruction
         const instructDiv = document.createElement('div');
         instructDiv.id = 'selectPlayerMsg';
         instructDiv.className = 'no-data';
@@ -286,7 +328,6 @@ function setupPlayerFilter(markets) {
     });
 
     const sortedPlayers = Array.from(players).sort();
-
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
     defaultOption.textContent = '-- Select a Player --';
@@ -328,11 +369,11 @@ function filterAndRenderMarkets(playerName) {
     currentMarkets.forEach(market => {
         const marketNameLower = market.name.toLowerCase();
         
-        // If market name contains player name, include whole market
+        // Include if Market Name has player name
         if (marketNameLower.includes(playerLower)) {
             filteredMarkets.push(market);
         } else {
-            // Else filter outcomes
+            // Or if specific outcome matches player name
             const matchingOutcomes = market.outcomes.filter(outcome => {
                 return outcome.name.toLowerCase().includes(playerLower);
             });
@@ -352,18 +393,18 @@ function filterAndRenderMarkets(playerName) {
         noData.textContent = `No odds available for ${playerName}`;
         oddsContainer.appendChild(noData);
     } else {
-        renderMarkets(filteredMarkets);
+        renderMarkets(filteredMarkets, playerName);
     }
 }
 
-function renderMarkets(markets) {
+function renderMarkets(markets, playerName) {
     markets.forEach(market => {
-        const marketCard = createMarketCard(market);
+        const marketCard = createMarketCard(market, playerName);
         oddsContainer.appendChild(marketCard);
     });
 }
 
-function createMarketCard(market) {
+function createMarketCard(market, playerName) {
     const card = document.createElement('div');
     card.className = 'market-card';
 
@@ -378,10 +419,12 @@ function createMarketCard(market) {
     const addBtn = document.createElement('button');
     addBtn.className = 'add-market-btn';
     addBtn.textContent = '+';
-    addBtn.title = 'Add to CSV Export';
+    addBtn.title = 'Add this market to CSV Export';
+    
+    // Store reference to check if already added
     addBtn.onclick = (e) => {
         e.stopPropagation();
-        addMarketToCSV(market);
+        addMarketToCSV(market, playerName, addBtn);
     };
 
     header.appendChild(title);
@@ -407,7 +450,6 @@ function createOutcomeCard(outcome) {
     const name = document.createElement('div');
     name.className = 'outcome-name';
     name.textContent = outcome.name;
-    name.title = outcome.name; // Tooltip for truncated text
 
     const odds = document.createElement('div');
     odds.className = 'outcome-odds';
@@ -418,59 +460,177 @@ function createOutcomeCard(outcome) {
     return card;
 }
 
-// Add market to CSV data
-function addMarketToCSV(market) {
-    const eventName = currentEventData ? (currentEventData.name || currentEventData.eventName) : 'Unknown Event';
-    const marketName = market.name;
+// === CSV LOGIC ===
 
+// Map English API terms to Croatian CSV terms
+function getMappedMarketName(apiMarketName, outcomeName) {
+    const name = apiMarketName.toLowerCase();
+    const outName = outcomeName.toLowerCase();
+
+    // Specific Goalscorer mapping
+    if (name.includes('anytime goalscorer')) return 'daje gol';
+    if (name.includes('first goalscorer')) return 'prvi daje gol';
+    if (name.includes('last goalscorer')) return 'poslednji daje gol';
+    if (name.includes('2 or more')) return 'daje 2+ gola';
+    if (name.includes('3 or more') || name.includes('hat trick')) return 'daje 3+ gola';
+
+    // Shots
+    if (name.includes('shots on target')) {
+        if (name.includes('1 or more')) return 'šutevi u okvir gola'; // 1+ implicit if line is 0.5 usually, need careful check
+        // Check outcome name or market name for lines
+        if (name.includes('2 or more')) return 'šutevi u okvir gola'; 
+        return 'šutevi u okvir gola';
+    }
+    if (name.includes('shots')) return 'ukupno šuteva';
+
+    // Cards
+    if (name.includes('to be carded') || name.includes('shown a card')) return 'dobija karton';
+    if (name.includes('red card')) return 'dobija crveni karton';
+    
+    // Assists
+    if (name.includes('assist')) return 'asistencija';
+    
+    // Stats (Fouls, Tackles, Passes usually follow standard structure)
+    if (name.includes('foul')) return 'ukupno načinjenih faulova';
+    if (name.includes('pass')) return 'ukupno pasova';
+    if (name.includes('tackle')) return 'ukupno startova';
+
+    // Default fallback
+    return apiMarketName; // Return original if no match
+}
+
+function getMappedSelection(marketName, outcomeName) {
+    const mName = marketName.toLowerCase();
+    const oName = outcomeName.toLowerCase();
+
+    // If it's a simple Yes/No market
+    if (oName === 'yes') return 'DA';
+    if (oName === 'no') return 'NE';
+
+    // If Over/Under
+    if (oName === 'over') return 'Više';
+    if (oName === 'under') return 'Manje';
+
+    // Extract lines for stats (e.g. "2 or more")
+    const match = mName.match(/(\d+)\s+or\s+more/);
+    if (match) {
+        return `${match[1]}+`;
+    }
+    
+    // Handle "Exactly X"
+    const exactMatch = mName.match(/exactly\s+(\d+)/);
+    if (exactMatch) {
+        return exactMatch[1];
+    }
+
+    // Default for players (if outcome is just the player name, usually the market implies the action 'DA')
+    // But check if we need 1+, 2+ etc. 
+    // In our specific CSV structure "daje gol" -> "DA". 
+    // "ukupno šuteva" -> "1+" or "2+".
+    
+    // Logic for shots/fouls based on market name parsing
+    if (mName.includes('shot') || mName.includes('foul') || mName.includes('tackle')) {
+       // Check if line exists in market name like "2 or more shots"
+       const line = mName.match(/(\d+)\s+or\s+more/);
+       if (line) return `${line[1]}+`;
+    }
+
+    return 'DA'; // Default active selection
+}
+
+function addMarketToCSV(market, playerName, btnElement) {
+    if (!selectedClub) {
+        alert('Please select a club from the dropdown first.');
+        return;
+    }
+    
+    if (!playerName) {
+        alert('No player selected.');
+        return;
+    }
+
+    // Initialize array for player if not exists
+    if (!csvExportData[playerName]) {
+        csvExportData[playerName] = [];
+    }
+
+    const dateTime = formatDate(currentEventData.startTime || currentEventData.date);
+
+    // Process each outcome (usually just one relevant one for the player filter logic, 
+    // or Over/Under/Yes/No pairs)
+    // We need to be smart here. The CSV structure is one row per line.
+    // If market has "Over" and "Under", we usually want the specific line the user clicked? 
+    // But the "+" is on the market card. So we add all visible outcomes on that card.
+    
     market.outcomes.forEach(outcome => {
+        const mappedMarket = getMappedMarketName(market.name, outcome.name);
+        const mappedSelection = getMappedSelection(market.name, outcome.name);
+        const odds = formatOdds(outcome);
+
         const row = {
-            Event: eventName,
-            Market: marketName,
-            Selection: outcome.name,
-            Odds: formatOdds(outcome)
+            date: dateTime.date,
+            time: dateTime.time,
+            code: '', // Sifra (empty)
+            market: mappedMarket,
+            selection: mappedSelection,
+            odds: odds
         };
-        csvExportData.push(row);
+        
+        // Prevent duplicates
+        const exists = csvExportData[playerName].some(r => 
+            r.market === row.market && r.selection === row.selection
+        );
+        
+        if (!exists) {
+            csvExportData[playerName].push(row);
+        }
     });
 
     updateCsvButtonCount();
     
-    // Optional feedback
-    const btn = event.target;
-    const originalText = btn.textContent;
-    btn.textContent = '✓';
-    btn.style.backgroundColor = '#38a169';
+    // Feedback
+    const originalText = btnElement.textContent;
+    btnElement.textContent = '✓';
+    btnElement.style.backgroundColor = '#38a169';
     setTimeout(() => {
-        btn.textContent = originalText;
-        btn.style.backgroundColor = '';
+        btnElement.textContent = originalText;
+        btnElement.style.backgroundColor = '';
     }, 1000);
 }
 
-// Generate and Download CSV
 function downloadCSV() {
-    if (csvExportData.length === 0) {
+    // Check if we have data
+    const players = Object.keys(csvExportData);
+    if (players.length === 0) {
         alert('No markets added to CSV yet.');
         return;
     }
 
-    const headers = ['Event', 'Market', 'Selection', 'Odds'];
-    const csvContent = [
-        headers.join(','), // Header row
-        ...csvExportData.map(row => {
-            // Escape quotes and wrap fields in quotes to handle commas in text
-            return headers.map(header => {
-                const cell = String(row[header] || '');
-                return `"${cell.replace(/"/g, '""')}"`;
-            }).join(',');
-        })
-    ].join('\n');
+    // Header
+    let csvContent = 'Datum,Vreme,Sifra,Domacin,Gost,1,X,2,GR,U,O,Yes,No\n';
+    
+    // Match Name Row
+    csvContent += `MATCH_NAME:${selectedClub}\n`;
+
+    // Iterate Players
+    players.forEach(player => {
+        csvContent += `LEAGUE_NAME:${player}\n`;
+        
+        const rows = csvExportData[player];
+        rows.forEach(row => {
+            // Build the row string matching: 18.12.2025,20:00,,daje gol,DA,13.00,,,,,,,
+            // Structure: Datum, Vreme, Sifra (empty), Market, Selection, Odds, empty...
+            const line = `${row.date},${row.time},,${row.market},${row.selection},${row.odds},,,,,,,`;
+            csvContent += line + '\n';
+        });
+    });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     
     link.setAttribute('href', url);
-    link.setAttribute('download', 'betting_markets_export.csv');
+    link.setAttribute('download', `${selectedClub}_odds.csv`);
     link.style.visibility = 'hidden';
     
     document.body.appendChild(link);
@@ -519,7 +679,6 @@ function parseMarkets(data) {
                 return marketsList;
             }
         }
-        // Fallbacks for other structures...
         if (data.markets) return data.markets;
     } catch (e) { console.error(e); }
     return marketsList;
