@@ -251,7 +251,7 @@ function displayOdds(data) {
     try {
         const allMarkets = parseMarkets(data);
 
-        // FILTER: Player related only
+        // FILTER: Keep only Player related markets
         currentMarkets = allMarkets.filter(market => {
             const name = (market.name || '').toLowerCase();
             const isPlayerRelated = name.includes('player') || 
@@ -269,7 +269,7 @@ function displayOdds(data) {
         });
 
         if (currentMarkets.length === 0) {
-            oddsContainer.innerHTML += '<div class="no-data">No player betting markets available</div>';
+            oddsContainer.innerHTML += '<div class="no-data">No player betting markets available for this event</div>';
             return;
         }
 
@@ -363,22 +363,23 @@ function filterAndRenderMarkets(playerName) {
         return;
     }
 
-    const filteredMarkets = [];
+    let filteredMarkets = [];
     const playerLower = playerName.toLowerCase();
 
     currentMarkets.forEach(market => {
         const marketNameLower = market.name.toLowerCase();
         
-        // Include if Market Name has player name
+        // If market name contains player name, include whole market
         if (marketNameLower.includes(playerLower)) {
             filteredMarkets.push(market);
         } else {
-            // Or if specific outcome matches player name
+            // Else filter outcomes
             const matchingOutcomes = market.outcomes.filter(outcome => {
                 return outcome.name.toLowerCase().includes(playerLower);
             });
 
             if (matchingOutcomes.length > 0) {
+                // Clone the market and only include matching outcomes
                 filteredMarkets.push({
                     ...market,
                     outcomes: matchingOutcomes
@@ -393,14 +394,64 @@ function filterAndRenderMarkets(playerName) {
         noData.textContent = `No odds available for ${playerName}`;
         oddsContainer.appendChild(noData);
     } else {
-        renderMarkets(filteredMarkets, playerName);
+        // Group and render markets by type
+        renderGroupedMarkets(filteredMarkets, playerName);
     }
 }
 
-function renderMarkets(markets, playerName) {
+// Function to classify markets into groups
+function getMarketGroup(marketName) {
+    const name = marketName.toLowerCase();
+    
+    if (name.includes('shot') && name.includes('target')) return 'Shots on Target';
+    if (name.includes('shot')) return 'Total Shots';
+    if (name.includes('assist')) return 'Assists';
+    if (name.includes('score') && name.includes('win')) return 'Score & Win'; // Player to Score and Team Win
+    if (name.includes('goalscorer') || name.includes('score')) return 'Goalscorers';
+    if (name.includes('card') || name.includes('shown')) return 'Cards';
+    if (name.includes('offside')) return 'Offsides';
+    if (name.includes('foul')) return 'Fouls';
+    if (name.includes('tackle')) return 'Tackles';
+    if (name.includes('pass')) return 'Passes';
+    
+    return 'Other';
+}
+
+function renderGroupedMarkets(markets, playerName) {
+    // Group markets
+    const groups = {};
+    
     markets.forEach(market => {
-        const marketCard = createMarketCard(market, playerName);
-        oddsContainer.appendChild(marketCard);
+        const groupName = getMarketGroup(market.name);
+        if (!groups[groupName]) {
+            groups[groupName] = [];
+        }
+        groups[groupName].push(market);
+    });
+
+    // Define sort order for groups if needed, otherwise alphabetical
+    const sortOrder = ['Goalscorers', 'Score & Win', 'Shots on Target', 'Total Shots', 'Assists', 'Cards', 'Offsides', 'Fouls', 'Tackles', 'Passes', 'Other'];
+
+    // Render groups in order
+    sortOrder.forEach(groupName => {
+        if (groups[groupName] && groups[groupName].length > 0) {
+            // Group Header
+            const groupHeader = document.createElement('h4');
+            groupHeader.className = 'market-group-title';
+            groupHeader.textContent = groupName;
+            groupHeader.style.marginTop = '20px';
+            groupHeader.style.marginBottom = '10px';
+            groupHeader.style.color = '#2d3748';
+            groupHeader.style.borderBottom = '2px solid #e2e8f0';
+            groupHeader.style.paddingBottom = '5px';
+            oddsContainer.appendChild(groupHeader);
+
+            // Render markets in this group
+            groups[groupName].forEach(market => {
+                const marketCard = createMarketCard(market, playerName);
+                oddsContainer.appendChild(marketCard);
+            });
+        }
     });
 }
 
@@ -462,78 +513,83 @@ function createOutcomeCard(outcome) {
 
 // === CSV LOGIC ===
 
-// Map English API terms to Croatian CSV terms
+// Map English API terms to Croatian CSV terms based on requirements
 function getMappedMarketName(apiMarketName, outcomeName) {
     const name = apiMarketName.toLowerCase();
-    const outName = outcomeName.toLowerCase();
+    
+    // Player to Score and Team Win mapping
+    if (name.includes('score') && name.includes('team') && name.includes('win')) {
+        return 'Igrac daje gol i pobedjuje';
+    }
 
-    // Specific Goalscorer mapping
+    // Offsides
+    if (name.includes('offside')) {
+         const match = name.match(/(\d+)/);
+         if(match) return `ukupno ofsajda ${match[1]}+`;
+         return 'ukupno ofsajda 1+';
+    }
+
+    // Cards
+    if (name.includes('to be carded') || name.includes('shown a card')) return 'igrac dobija karton';
+    if (name.includes('red card')) return 'igrac dobija crveni karton';
+    
+    // Assists
+    if (name.includes('assist')) return 'asistencija';
+    
+    // Shots
+    if (name.includes('shots on target')) {
+         const match = name.match(/(\d+)/);
+         const line = match ? match[1] : '1';
+         return `šutevi u okvir gola ${line}+`; 
+    }
+    
+    if (name.includes('shots') && !name.includes('target')) {
+         const match = name.match(/(\d+)/);
+         const line = match ? match[1] : '1';
+         // Requirement: "ukupno suteva {} -granica iz igre" (assuming line is the granica)
+         // But usually displayed as "ukupno suteva 2+"
+         return `ukupno šuteva ${line}+`;
+    }
+
+    // Goalscorer mappings
     if (name.includes('anytime goalscorer')) return 'daje gol';
     if (name.includes('first goalscorer')) return 'prvi daje gol';
     if (name.includes('last goalscorer')) return 'poslednji daje gol';
     if (name.includes('2 or more')) return 'daje 2+ gola';
     if (name.includes('3 or more') || name.includes('hat trick')) return 'daje 3+ gola';
 
-    // Shots
-    if (name.includes('shots on target')) {
-        if (name.includes('1 or more')) return 'šutevi u okvir gola'; // 1+ implicit if line is 0.5 usually, need careful check
-        // Check outcome name or market name for lines
-        if (name.includes('2 or more')) return 'šutevi u okvir gola'; 
-        return 'šutevi u okvir gola';
-    }
-    if (name.includes('shots')) return 'ukupno šuteva';
-
-    // Cards
-    if (name.includes('to be carded') || name.includes('shown a card')) return 'dobija karton';
-    if (name.includes('red card')) return 'dobija crveni karton';
-    
-    // Assists
-    if (name.includes('assist')) return 'asistencija';
-    
-    // Stats (Fouls, Tackles, Passes usually follow standard structure)
+    // Stats generic
     if (name.includes('foul')) return 'ukupno načinjenih faulova';
     if (name.includes('pass')) return 'ukupno pasova';
     if (name.includes('tackle')) return 'ukupno startova';
 
     // Default fallback
-    return apiMarketName; // Return original if no match
+    return apiMarketName; 
 }
 
 function getMappedSelection(marketName, outcomeName) {
     const mName = marketName.toLowerCase();
     const oName = outcomeName.toLowerCase();
 
-    // If it's a simple Yes/No market
+    // Standard mappings
     if (oName === 'yes') return 'DA';
     if (oName === 'no') return 'NE';
-
-    // If Over/Under
     if (oName === 'over') return 'Više';
     if (oName === 'under') return 'Manje';
 
-    // Extract lines for stats (e.g. "2 or more")
-    const match = mName.match(/(\d+)\s+or\s+more/);
-    if (match) {
-        return `${match[1]}+`;
-    }
-    
     // Handle "Exactly X"
     const exactMatch = mName.match(/exactly\s+(\d+)/);
     if (exactMatch) {
         return exactMatch[1];
     }
-
-    // Default for players (if outcome is just the player name, usually the market implies the action 'DA')
-    // But check if we need 1+, 2+ etc. 
-    // In our specific CSV structure "daje gol" -> "DA". 
-    // "ukupno šuteva" -> "1+" or "2+".
     
-    // Logic for shots/fouls based on market name parsing
-    if (mName.includes('shot') || mName.includes('foul') || mName.includes('tackle')) {
-       // Check if line exists in market name like "2 or more shots"
-       const line = mName.match(/(\d+)\s+or\s+more/);
-       if (line) return `${line[1]}+`;
-    }
+    // Handle "X or more" in market name -> implies "DA" for the player outcome
+    if (mName.includes('or more')) return 'DA';
+    
+    // Handle "Player to Score..." -> "DA"
+    if (mName.includes('to score')) return 'DA';
+    if (mName.includes('to be carded')) return 'DA';
+    if (mName.includes('assist')) return 'DA';
 
     return 'DA'; // Default active selection
 }
@@ -556,13 +612,17 @@ function addMarketToCSV(market, playerName, btnElement) {
 
     const dateTime = formatDate(currentEventData.startTime || currentEventData.date);
 
-    // Process each outcome (usually just one relevant one for the player filter logic, 
-    // or Over/Under/Yes/No pairs)
-    // We need to be smart here. The CSV structure is one row per line.
-    // If market has "Over" and "Under", we usually want the specific line the user clicked? 
-    // But the "+" is on the market card. So we add all visible outcomes on that card.
+    // Filter relevant outcomes: only the one matching the player name OR all if generic market (like Yes/No)
+    // Actually, in the `filteredMarkets` step we usually narrowed down outcomes.
+    // However, `market.outcomes` might still contain all if we passed the full market.
+    // Let's filter again to be safe and only add the relevant line for THIS player.
     
-    market.outcomes.forEach(outcome => {
+    const relevantOutcomes = market.outcomes.filter(o => 
+        o.name.toLowerCase().includes(playerName.toLowerCase()) || 
+        ['yes', 'no', 'over', 'under'].includes(o.name.toLowerCase())
+    );
+
+    relevantOutcomes.forEach(outcome => {
         const mappedMarket = getMappedMarketName(market.name, outcome.name);
         const mappedSelection = getMappedSelection(market.name, outcome.name);
         const odds = formatOdds(outcome);
@@ -570,7 +630,7 @@ function addMarketToCSV(market, playerName, btnElement) {
         const row = {
             date: dateTime.date,
             time: dateTime.time,
-            code: '', // Sifra (empty)
+            code: '', 
             market: mappedMarket,
             selection: mappedSelection,
             odds: odds
@@ -619,7 +679,6 @@ function downloadCSV() {
         const rows = csvExportData[player];
         rows.forEach(row => {
             // Build the row string matching: 18.12.2025,20:00,,daje gol,DA,13.00,,,,,,,
-            // Structure: Datum, Vreme, Sifra (empty), Market, Selection, Odds, empty...
             const line = `${row.date},${row.time},,${row.market},${row.selection},${row.odds},,,,,,,`;
             csvContent += line + '\n';
         });
