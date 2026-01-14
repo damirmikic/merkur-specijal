@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Betting Events & Odds Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎲 Betting Events & Odds</h1>
+            <p class="subtitle">Select an event to view available betting odds</p>
+        </header>
+
+        <div class="controls">
+            <button id="loadEventsBtn" class="btn btn-primary">
+                <span class="btn-text">Load Events</span>
+                <span class="loader" style="display: none;"></span>
+            </button>
+        </div>
+
+        <div id="eventSection" style="display: none;">
+            <div class="form-group">
+                <label for="eventSelect">Select Event:</label>
+                <select id="eventSelect" class="event-select">
+                    <option value="">-- Choose an event --</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="oddsSection" style="display: none;">
+            <h2>Betting Odds</h2>
+            <div id="oddsContainer"></div>
+        </div>
+
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+        <div id="loadingMessage" class="loading-message" style="display: none;">
+            <div class="spinner"></div>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
