@@ -304,7 +304,61 @@ function parseMarkets(data) {
     const marketsList = [];
 
     try {
-        // Handle different response structures
+        // 1. Handle Ladbrokes/OpenBet SSResponse structure (nested children)
+        if (data.SSResponse && data.SSResponse.children) {
+            // Find the event node within the children array
+            const eventNode = data.SSResponse.children.find(child => child.event);
+            
+            if (eventNode && eventNode.event && eventNode.event.children) {
+                // Iterate over the children of the event to find markets
+                eventNode.event.children.forEach(child => {
+                    if (child.market) {
+                        const rawMarket = child.market;
+                        
+                        // Create a clean market object
+                        const market = {
+                            id: rawMarket.id,
+                            name: rawMarket.name,
+                            outcomes: []
+                        };
+
+                        // Process outcomes if they exist in the market's children
+                        if (rawMarket.children) {
+                            rawMarket.children.forEach(outcomeNode => {
+                                if (outcomeNode.outcome) {
+                                    const rawOutcome = outcomeNode.outcome;
+                                    const outcome = {
+                                        name: rawOutcome.name,
+                                        id: rawOutcome.id,
+                                        ...rawOutcome // Keep other properties
+                                    };
+
+                                    // Extract price/odds from the nested children array of the outcome
+                                    if (rawOutcome.children) {
+                                        const priceNode = rawOutcome.children.find(c => c.price);
+                                        if (priceNode && priceNode.price) {
+                                            // Assign decimal odds to 'odds' property for the display function
+                                            // Prefer priceDec, otherwise other formats if needed
+                                            outcome.odds = parseFloat(priceNode.price.priceDec);
+                                            outcome.price = priceNode.price; // Keep raw price obj just in case
+                                        }
+                                    }
+                                    market.outcomes.push(outcome);
+                                }
+                            });
+                        }
+                        marketsList.push(market);
+                    }
+                });
+                
+                // Return immediately if we found markets in this structure
+                if (marketsList.length > 0) {
+                    return marketsList;
+                }
+            }
+        }
+
+        // 2. Fallback: Handle other possible response structures (Standard JSONs)
         if (data.markets && Array.isArray(data.markets)) {
             return data.markets;
         }
@@ -313,11 +367,7 @@ function parseMarkets(data) {
             return Array.isArray(data.data.markets) ? data.data.markets : [data.data.markets];
         }
 
-        if (data.SSResponse && data.SSResponse.markets) {
-            return Array.isArray(data.SSResponse.markets) ? data.SSResponse.markets : [data.SSResponse.markets];
-        }
-
-        // Look for outcome structures
+        // Look for outcome structures at root
         if (data.outcomes || data.selections) {
             return [{
                 name: 'Main Market',
@@ -326,7 +376,7 @@ function parseMarkets(data) {
             }];
         }
 
-        // Try to find markets in nested structures
+        // Try to find markets in nested generic structures
         for (const key in data) {
             if (data[key] && typeof data[key] === 'object') {
                 if (data[key].markets) {
@@ -406,6 +456,7 @@ function formatOdds(outcome) {
         if (typeof oddsValue === 'number') {
             return oddsValue.toFixed(2);
         }
+        // If string, return as is (parseMarkets logic ensures decimal strings are handled)
         return oddsValue;
     }
 
@@ -416,6 +467,11 @@ function formatOdds(outcome) {
 
     if (outcome.odds_data) {
         return formatOdds(outcome.odds_data);
+    }
+
+    // Last resort check for price object created in parseMarkets
+    if (outcome.price && outcome.price.priceDec) {
+        return outcome.price.priceDec;
     }
 
     return 'N/A';
