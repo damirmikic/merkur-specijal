@@ -5,7 +5,8 @@ const ODDS_API_BASE = '/.netlify/functions/get-odds';
 // State
 let events = [];
 let currentEventData = null;
-let currentMarkets = []; // Store parsed markets for filtering
+let currentMarkets = [];
+let csvExportData = []; // Store data for CSV export
 
 // DOM Elements
 const loadEventsBtn = document.getElementById('loadEventsBtn');
@@ -67,137 +68,70 @@ async function loadEvents() {
     try {
         const response = await fetch(EVENTS_API, {
             method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-            }
+            headers: { 'Accept': 'application/json' }
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to fetch events: ${response.status} ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`Failed to fetch events: ${response.status}`);
 
         const data = await response.json();
-        console.log('Events API Response:', data);
-
-        // Parse the events from the response
         events = parseEvents(data);
 
         if (events.length === 0) {
-            showError('No events found in the response');
+            showError('No events found');
             return;
         }
 
         populateEventDropdown();
         showElement(eventSection);
+        
+        // Setup CSV Download Button if not already present
+        setupCsvButton();
 
     } catch (error) {
-        console.error('Error loading events:', error);
-        showError(`Error loading events: ${error.message}. Please check browser console for details.`);
+        console.error('Error:', error);
+        showError(`Error loading events: ${error.message}`);
     } finally {
         setButtonLoading(false);
     }
 }
 
-// Parse events from API response
 function parseEvents(data) {
     const eventsList = [];
-
     try {
-        // Ladbrokes API specific structure: modules[].data[]
         if (data.modules && Array.isArray(data.modules)) {
-            // Extract events from all modules
             data.modules.forEach(module => {
                 if (module.data && Array.isArray(module.data)) {
                     eventsList.push(...module.data);
                 }
             });
-
-            if (eventsList.length > 0) {
-                return eventsList;
-            }
+            if (eventsList.length > 0) return eventsList;
         }
-
-        // Fallback: Handle other possible response structures
-        if (data.events && Array.isArray(data.events)) {
-            return data.events;
-        }
-
-        if (data.data && Array.isArray(data.data)) {
-            return data.data;
-        }
-
-        if (Array.isArray(data)) {
-            return data;
-        }
-
-        // If we can't parse it, return the whole data wrapped in array
-        if (data.id || data.eventId) {
-            return [data];
-        }
-
-        // Try to extract from any property that looks like it contains events
-        for (const key in data) {
-            if (Array.isArray(data[key]) && data[key].length > 0) {
-                const firstItem = data[key][0];
-                if (firstItem.id || firstItem.eventId || firstItem.name) {
-                    return data[key];
-                }
-            }
-        }
-
-    } catch (error) {
-        console.error('Error parsing events:', error);
-    }
-
+        if (data.events) return data.events;
+        if (Array.isArray(data)) return data;
+    } catch (e) { console.error(e); }
     return eventsList;
 }
 
-// Populate dropdown with events
 function populateEventDropdown() {
     eventSelect.innerHTML = '<option value="">-- Choose an event --</option>';
-
     events.forEach(event => {
         const option = document.createElement('option');
-        const eventId = event.id || event.eventId || event.event_id;
-        const eventName = event.name || event.title || event.event_name || `Event ${eventId}`;
-        const eventDate = event.startTime || event.date || event.start_time || '';
-        const competition = event.typeName || event.className || '';
-
-        option.value = eventId;
-
-        // Build display text with competition and date
-        let displayText = eventName;
-        if (competition) {
-            displayText = `${eventName} (${competition})`;
-        }
-        if (eventDate) {
-            displayText += ` - ${formatDate(eventDate)}`;
-        }
-
-        option.textContent = displayText;
+        option.value = event.id || event.eventId;
+        option.textContent = event.name || event.eventName;
         option.dataset.event = JSON.stringify(event);
-
         eventSelect.appendChild(option);
     });
 }
 
-// Format date
 function formatDate(dateString) {
     try {
-        const date = new Date(dateString);
-        return date.toLocaleString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
+        return new Date(dateString).toLocaleString('en-GB', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit'
         });
-    } catch (error) {
-        return dateString;
-    }
+    } catch { return dateString; }
 }
 
-// Handle event selection
 async function handleEventSelection(e) {
     const selectedOption = e.target.options[e.target.selectedIndex];
     const eventId = selectedOption.value;
@@ -207,66 +141,74 @@ async function handleEventSelection(e) {
         return;
     }
 
-    const eventData = JSON.parse(selectedOption.dataset.event);
-    currentEventData = eventData;
-
+    currentEventData = JSON.parse(selectedOption.dataset.event);
     await loadOdds(eventId);
 }
 
-// Fetch odds for selected event
 async function loadOdds(eventId) {
     showLoading();
     hideElement(errorMessage);
     hideElement(oddsSection);
 
     try {
-        const oddsUrl = `${ODDS_API_BASE}?eventId=${eventId}`;
-
-        const response = await fetch(oddsUrl, {
-            method: 'GET',
-            headers: {
-                'Accept': 'application/json',
-            }
+        const response = await fetch(`${ODDS_API_BASE}?eventId=${eventId}`, {
+            headers: { 'Accept': 'application/json' }
         });
 
-        if (!response.ok) {
-            throw new Error(`Failed to fetch odds: ${response.status} ${response.statusText}`);
-        }
+        if (!response.ok) throw new Error(`Failed to fetch odds: ${response.status}`);
 
         const data = await response.json();
-        console.log('Odds API Response:', data);
-
         displayOdds(data);
         showElement(oddsSection);
 
     } catch (error) {
-        console.error('Error loading odds:', error);
-        showError(`Error loading odds: ${error.message}. Please check browser console for details.`);
+        showError(`Error loading odds: ${error.message}`);
     } finally {
         hideLoading();
     }
 }
 
-// Display odds
+// Setup CSV Download Button in the controls area
+function setupCsvButton() {
+    let btnContainer = document.getElementById('downloadCsvContainer');
+    if (!btnContainer) {
+        btnContainer = document.createElement('div');
+        btnContainer.id = 'downloadCsvContainer';
+        
+        const btn = document.createElement('button');
+        btn.id = 'downloadCsvBtn';
+        btn.textContent = 'Download CSV (0)';
+        btn.onclick = downloadCSV;
+        
+        btnContainer.appendChild(btn);
+        
+        // Append next to load button
+        const controls = document.querySelector('.controls');
+        controls.appendChild(btnContainer);
+    }
+}
+
+function updateCsvButtonCount() {
+    const btn = document.getElementById('downloadCsvBtn');
+    if (btn) {
+        btn.textContent = `Download CSV (${csvExportData.length})`;
+    }
+}
+
 function displayOdds(data) {
     oddsContainer.innerHTML = '';
     
-    // Clear any existing player filter
+    // Clear existing filter
     const existingFilter = document.getElementById('playerFilterContainer');
     if(existingFilter) existingFilter.remove();
 
-    // Display event information
     const eventInfo = createEventInfo();
-    if (eventInfo) {
-        oddsContainer.appendChild(eventInfo);
-    }
+    if (eventInfo) oddsContainer.appendChild(eventInfo);
 
     try {
-        // Parse markets and outcomes
         const allMarkets = parseMarkets(data);
 
-        // FILTER: Keep only markets related to players (Goalscorers, Player Stats, etc.)
-        // Exclude generic team/match markets like "Correct Score", "Both Teams To Score"
+        // FILTER: Keep only Player related markets
         currentMarkets = allMarkets.filter(market => {
             const name = (market.name || '').toLowerCase();
             const isPlayerRelated = name.includes('player') || 
@@ -276,7 +218,7 @@ function displayOdds(data) {
             
             const isExcluded = name.includes('correct score') || 
                                name.includes('both teams') ||
-                               name.includes('team to score') || // "First Team to Score"
+                               name.includes('team to score') ||
                                name.includes('half time') ||
                                name.includes('handicap');
             
@@ -284,43 +226,33 @@ function displayOdds(data) {
         });
 
         if (currentMarkets.length === 0) {
-            const noDiv = document.createElement('div');
-            noDiv.className = 'no-data';
-            noDiv.textContent = 'No player betting markets available for this event';
-            oddsContainer.appendChild(noDiv);
+            oddsContainer.innerHTML += '<div class="no-data">No player betting markets available for this event</div>';
             return;
         }
 
-        // Setup the Player Filter Dropdown
         setupPlayerFilter(currentMarkets);
 
-        // Show instruction message initially
+        // Initial instruction
         const instructDiv = document.createElement('div');
         instructDiv.id = 'selectPlayerMsg';
         instructDiv.className = 'no-data';
-        instructDiv.style.backgroundColor = '#e9ecef';
-        instructDiv.style.color = '#495057';
-        instructDiv.textContent = 'Please select a player from the dropdown to view odds.';
+        instructDiv.textContent = 'Please select a player from the dropdown above to view odds.';
         oddsContainer.appendChild(instructDiv);
 
     } catch (error) {
-        console.error('Error displaying odds:', error);
-        const errDiv = document.createElement('div');
-        errDiv.className = 'no-data';
-        errDiv.textContent = 'Error displaying odds data';
-        oddsContainer.appendChild(errDiv);
+        console.error(error);
+        oddsContainer.innerHTML += '<div class="no-data">Error displaying odds data</div>';
     }
 }
 
-// Create and setup the player filter dropdown
 function setupPlayerFilter(markets) {
     const filterContainer = document.createElement('div');
     filterContainer.id = 'playerFilterContainer';
-    filterContainer.style.marginBottom = '20px';
-    filterContainer.style.padding = '15px';
-    filterContainer.style.backgroundColor = '#f8f9fa';
-    filterContainer.style.borderRadius = '8px';
-    filterContainer.style.border = '1px solid #dee2e6';
+    filterContainer.style.marginBottom = '15px';
+    filterContainer.style.padding = '10px';
+    filterContainer.style.backgroundColor = '#fff';
+    filterContainer.style.borderRadius = '6px';
+    filterContainer.style.border = '1px solid #e2e8f0';
     filterContainer.style.display = 'flex';
     filterContainer.style.alignItems = 'center';
 
@@ -328,17 +260,10 @@ function setupPlayerFilter(markets) {
     label.textContent = 'Select Player: ';
     label.style.marginRight = '10px';
     label.style.fontWeight = 'bold';
-    label.style.color = '#333';
     
     const select = document.createElement('select');
     select.id = 'playerSelect';
-    select.style.padding = '8px';
-    select.style.borderRadius = '4px';
-    select.style.border = '1px solid #ced4da';
-    select.style.flexGrow = '1';
-    select.style.maxWidth = '300px';
 
-    // Extract unique player names
     const players = new Set();
     const excludeTerms = [
         'over', 'under', 'yes', 'no', 'draw', 'none', 'odd', 'even', 
@@ -346,13 +271,11 @@ function setupPlayerFilter(markets) {
     ];
 
     markets.forEach(market => {
-        // Method 1: Check outcomes for player names (e.g. "Mohamed Salah" in "First Goalscorer")
         market.outcomes.forEach(outcome => {
             const name = outcome.name;
             if (name) {
                 const nameLower = name.toLowerCase();
                 const isGeneric = excludeTerms.some(term => nameLower === term || nameLower.startsWith(term + ' '));
-                // Ensure it looks like a name (not a number or short code)
                 const isName = name.length > 2 && !/^\d/.test(name);
                 
                 if (!isGeneric && isName) {
@@ -364,7 +287,6 @@ function setupPlayerFilter(markets) {
 
     const sortedPlayers = Array.from(players).sort();
 
-    // Default option
     const defaultOption = document.createElement('option');
     defaultOption.value = '';
     defaultOption.textContent = '-- Select a Player --';
@@ -387,15 +309,10 @@ function setupPlayerFilter(markets) {
     oddsSection.insertBefore(filterContainer, oddsContainer);
 }
 
-// Filter markets based on selected player and render
 function filterAndRenderMarkets(playerName) {
     oddsContainer.innerHTML = '';
-    
-    // Re-append event info
     const eventInfo = createEventInfo();
-    if (eventInfo) {
-        oddsContainer.appendChild(eventInfo);
-    }
+    if (eventInfo) oddsContainer.appendChild(eventInfo);
 
     if (!playerName) {
         const instructDiv = document.createElement('div');
@@ -411,21 +328,16 @@ function filterAndRenderMarkets(playerName) {
     currentMarkets.forEach(market => {
         const marketNameLower = market.name.toLowerCase();
         
-        // Logic:
-        // 1. If Market Name contains Player Name -> Show entire market (e.g. "Mohamed Salah Shots")
-        // 2. If Outcomes contain Player Name -> Show ONLY that outcome (e.g. "First Goalscorer" -> "Mohamed Salah")
-        
+        // If market name contains player name, include whole market
         if (marketNameLower.includes(playerLower)) {
             filteredMarkets.push(market);
         } else {
-            // Find outcomes that strictly match the player name or contain it (e.g. "Mohamed Salah to score")
+            // Else filter outcomes
             const matchingOutcomes = market.outcomes.filter(outcome => {
-                const outcomeNameLower = outcome.name.toLowerCase();
-                return outcomeNameLower.includes(playerLower);
+                return outcome.name.toLowerCase().includes(playerLower);
             });
 
             if (matchingOutcomes.length > 0) {
-                // Create a shallow copy of the market with specific outcomes
                 filteredMarkets.push({
                     ...market,
                     outcomes: matchingOutcomes
@@ -444,7 +356,6 @@ function filterAndRenderMarkets(playerName) {
     }
 }
 
-// Render a list of markets
 function renderMarkets(markets) {
     markets.forEach(market => {
         const marketCard = createMarketCard(market);
@@ -452,171 +363,171 @@ function renderMarkets(markets) {
     });
 }
 
-// Create event info display
+function createMarketCard(market) {
+    const card = document.createElement('div');
+    card.className = 'market-card';
+
+    const header = document.createElement('div');
+    header.className = 'market-header';
+
+    const title = document.createElement('span');
+    title.className = 'market-title';
+    title.textContent = market.name;
+
+    // Add Button (+)
+    const addBtn = document.createElement('button');
+    addBtn.className = 'add-market-btn';
+    addBtn.textContent = '+';
+    addBtn.title = 'Add to CSV Export';
+    addBtn.onclick = (e) => {
+        e.stopPropagation();
+        addMarketToCSV(market);
+    };
+
+    header.appendChild(title);
+    header.appendChild(addBtn);
+    card.appendChild(header);
+
+    const outcomesGrid = document.createElement('div');
+    outcomesGrid.className = 'outcomes-grid';
+
+    market.outcomes.forEach(outcome => {
+        const outcomeCard = createOutcomeCard(outcome);
+        outcomesGrid.appendChild(outcomeCard);
+    });
+
+    card.appendChild(outcomesGrid);
+    return card;
+}
+
+function createOutcomeCard(outcome) {
+    const card = document.createElement('div');
+    card.className = 'outcome-card';
+
+    const name = document.createElement('div');
+    name.className = 'outcome-name';
+    name.textContent = outcome.name;
+    name.title = outcome.name; // Tooltip for truncated text
+
+    const odds = document.createElement('div');
+    odds.className = 'outcome-odds';
+    odds.textContent = formatOdds(outcome);
+
+    card.appendChild(name);
+    card.appendChild(odds);
+    return card;
+}
+
+// Add market to CSV data
+function addMarketToCSV(market) {
+    const eventName = currentEventData ? (currentEventData.name || currentEventData.eventName) : 'Unknown Event';
+    const marketName = market.name;
+
+    market.outcomes.forEach(outcome => {
+        const row = {
+            Event: eventName,
+            Market: marketName,
+            Selection: outcome.name,
+            Odds: formatOdds(outcome)
+        };
+        csvExportData.push(row);
+    });
+
+    updateCsvButtonCount();
+    
+    // Optional feedback
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = '✓';
+    btn.style.backgroundColor = '#38a169';
+    setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.backgroundColor = '';
+    }, 1000);
+}
+
+// Generate and Download CSV
+function downloadCSV() {
+    if (csvExportData.length === 0) {
+        alert('No markets added to CSV yet.');
+        return;
+    }
+
+    const headers = ['Event', 'Market', 'Selection', 'Odds'];
+    const csvContent = [
+        headers.join(','), // Header row
+        ...csvExportData.map(row => {
+            // Escape quotes and wrap fields in quotes to handle commas in text
+            return headers.map(header => {
+                const cell = String(row[header] || '');
+                return `"${cell.replace(/"/g, '""')}"`;
+            }).join(',');
+        })
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'betting_markets_export.csv');
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+// Helper Functions
 function createEventInfo() {
     if (!currentEventData) return null;
-
     const div = document.createElement('div');
     div.className = 'event-info';
-
-    const name = currentEventData.name || currentEventData.title || 'Event';
-    const date = currentEventData.startTime || currentEventData.date || currentEventData.start_time;
-    const competition = currentEventData.typeName || currentEventData.className || currentEventData.competition || '';
-    const category = currentEventData.categoryName || '';
-
-    div.innerHTML = `
-        <h3>${name}</h3>
-        ${date ? `<p><strong>Date:</strong> ${formatDate(date)}</p>` : ''}
-        ${category ? `<p><strong>Sport:</strong> ${category}</p>` : ''}
-        ${competition ? `<p><strong>Competition:</strong> ${competition}</p>` : ''}
-    `;
-
+    div.innerHTML = `<h3>${currentEventData.name}</h3>`;
     return div;
 }
 
-// Parse markets from odds response
 function parseMarkets(data) {
     const marketsList = [];
-
     try {
-        // 1. Handle Ladbrokes/OpenBet SSResponse structure (nested children)
         if (data.SSResponse && data.SSResponse.children) {
             const eventNode = data.SSResponse.children.find(child => child.event);
-            
             if (eventNode && eventNode.event && eventNode.event.children) {
                 eventNode.event.children.forEach(child => {
                     if (child.market) {
-                        const rawMarket = child.market;
-                        const market = {
-                            id: rawMarket.id,
-                            name: rawMarket.name,
-                            outcomes: []
-                        };
-
-                        if (rawMarket.children) {
-                            rawMarket.children.forEach(outcomeNode => {
-                                if (outcomeNode.outcome) {
-                                    const rawOutcome = outcomeNode.outcome;
-                                    const outcome = {
-                                        name: rawOutcome.name,
-                                        id: rawOutcome.id,
-                                        ...rawOutcome
-                                    };
-
-                                    if (rawOutcome.children) {
-                                        const priceNode = rawOutcome.children.find(c => c.price);
-                                        if (priceNode && priceNode.price) {
-                                            outcome.odds = parseFloat(priceNode.price.priceDec);
-                                            outcome.price = priceNode.price;
+                        const m = child.market;
+                        const market = { id: m.id, name: m.name, outcomes: [] };
+                        if (m.children) {
+                            m.children.forEach(o => {
+                                if (o.outcome) {
+                                    const out = o.outcome;
+                                    const outcomeObj = { name: out.name, id: out.id, ...out };
+                                    if (out.children) {
+                                        const p = out.children.find(c => c.price);
+                                        if (p && p.price) {
+                                            outcomeObj.odds = parseFloat(p.price.priceDec);
+                                            outcomeObj.price = p.price;
                                         }
                                     }
-                                    market.outcomes.push(outcome);
+                                    market.outcomes.push(outcomeObj);
                                 }
                             });
                         }
                         marketsList.push(market);
                     }
                 });
-                
-                if (marketsList.length > 0) return marketsList;
+                return marketsList;
             }
         }
-
-        // 2. Fallback: Standard JSON structures
-        if (data.markets && Array.isArray(data.markets)) return data.markets;
-        if (data.data && data.data.markets) return Array.isArray(data.data.markets) ? data.data.markets : [data.data.markets];
-
-        if (data.outcomes || data.selections) {
-            return [{
-                name: 'Main Market',
-                id: 'main',
-                outcomes: data.outcomes || data.selections
-            }];
-        }
-
-        // Generic fallback traversal
-        for (const key in data) {
-            if (data[key] && typeof data[key] === 'object') {
-                if (data[key].markets) return Array.isArray(data[key].markets) ? data[key].markets : [data[key].markets];
-                if (Array.isArray(data[key]) && data[key].length > 0) {
-                    if (data[key][0].outcomes || data[key][0].selections || data[key][0].name) return data[key];
-                }
-            }
-        }
-
-    } catch (error) {
-        console.error('Error parsing markets:', error);
-    }
-
+        // Fallbacks for other structures...
+        if (data.markets) return data.markets;
+    } catch (e) { console.error(e); }
     return marketsList;
 }
 
-// Create market card
-function createMarketCard(market) {
-    const card = document.createElement('div');
-    card.className = 'market-card';
-
-    const marketName = market.name || market.market_name || market.type || 'Market';
-    const outcomes = market.outcomes || market.selections || [];
-
-    card.innerHTML = `
-        <div class="market-title">${marketName}</div>
-        <div class="outcomes-grid" id="outcomes-${market.id || Math.random()}"></div>
-    `;
-
-    const outcomesGrid = card.querySelector('.outcomes-grid');
-
-    if (outcomes.length === 0) {
-        outcomesGrid.innerHTML = '<div class="no-data">No outcomes available</div>';
-    } else {
-        outcomes.forEach(outcome => {
-            const outcomeCard = createOutcomeCard(outcome);
-            outcomesGrid.appendChild(outcomeCard);
-        });
-    }
-
-    return card;
-}
-
-// Create outcome card
-function createOutcomeCard(outcome) {
-    const card = document.createElement('div');
-    card.className = 'outcome-card';
-
-    const name = outcome.name || outcome.selection || outcome.runner || 'Selection';
-    const odds = formatOdds(outcome);
-
-    card.innerHTML = `
-        <div class="outcome-name">${name}</div>
-        <div class="outcome-odds">${odds}</div>
-    `;
-
-    return card;
-}
-
-// Format odds
 function formatOdds(outcome) {
-    const oddsValue = outcome.odds ||
-                     outcome.price ||
-                     outcome.decimal_odds ||
-                     outcome.decimalOdds ||
-                     outcome.fractional_odds ||
-                     outcome.fractionalOdds;
-
-    if (oddsValue) {
-        if (typeof oddsValue === 'number') {
-            return oddsValue.toFixed(2);
-        }
-        return oddsValue;
-    }
-
-    if (outcome.price_data) return formatOdds(outcome.price_data);
-    if (outcome.odds_data) return formatOdds(outcome.odds_data);
-    if (outcome.price && outcome.price.priceDec) return outcome.price.priceDec;
-
-    return 'N/A';
+    const val = outcome.odds || outcome.price?.priceDec || outcome.decimal_odds;
+    return val ? Number(val).toFixed(2) : 'N/A';
 }
 
-// Initialize
 console.log('Betting App Initialized');
-console.log('Click "Load Events" to fetch available betting events');
