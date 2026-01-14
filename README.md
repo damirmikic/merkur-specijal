@@ -10,18 +10,23 @@ A modern web application for viewing betting events and odds from Ladbrokes API.
 - 🎨 Modern, responsive UI with gradient design
 - ⚡ Real-time data loading with loading indicators
 - 🛡️ Comprehensive error handling
+- 🚀 Netlify Functions for CORS-free API access
 
 ## How It Works
 
-### API Endpoints Used
+### API Architecture
 
-1. **Events API**: `https://cms-prod.ladbrokes.com/cms/api/ladbrokes/fsc/16`
+The app uses **Netlify Serverless Functions** to proxy API requests, completely eliminating CORS issues:
+
+1. **Events Endpoint**: `/.netlify/functions/get-events`
+   - Proxies: `https://cms-prod.ladbrokes.com/cms/api/ladbrokes/fsc/16`
    - Fetches available betting events
    - Returns event IDs, names, dates, and competition details
 
-2. **Odds API**: `https://ss-aka-ori.ladbrokes.com/openbet-ssviewer/Drilldown/2.86/EventToOutcomeForEvent/{eventId}`
+2. **Odds Endpoint**: `/.netlify/functions/get-odds?eventId={id}`
+   - Proxies: `https://ss-aka-ori.ladbrokes.com/openbet-ssviewer/Drilldown/2.86/EventToOutcomeForEvent/{eventId}`
    - Fetches odds for a specific event
-   - Parameters: scorecast=true, translationLang=en, responseFormat=json, referenceEachWayTerms=true
+   - All parameters are handled server-side
 
 ### Usage Instructions
 
@@ -44,54 +49,83 @@ A modern web application for viewing betting events and odds from Ladbrokes API.
 
 ## Running the App
 
-### Option 1: Direct File Opening
-Simply open `index.html` in your browser:
+### Deployment on Netlify (Recommended - Production Ready)
+
+This app is designed to run on **Netlify** with serverless functions:
+
+1. **Deploy to Netlify**:
+   ```bash
+   # Connect your repo to Netlify or use Netlify CLI
+   npm install -g netlify-cli
+   netlify deploy
+   ```
+
+2. **Automatic Setup**:
+   - Netlify automatically detects `netlify.toml`
+   - Functions are deployed to `/.netlify/functions/`
+   - No CORS issues - everything just works!
+
+### Local Development with Netlify CLI
+
+For local testing with serverless functions:
+
 ```bash
-open index.html
+# Install dependencies
+npm install
+
+# Install Netlify CLI
+npm install -g netlify-cli
+
+# Run locally with Netlify Dev
+netlify dev
 ```
 
-### Option 2: Local Web Server (Recommended)
-Using Python:
+This starts a local server with function support at `http://localhost:8888`
+
+### Local Development (Simple - Limited Functionality)
+
+For quick testing without functions (will have CORS issues with real APIs):
+
 ```bash
+# Using Python
 python -m http.server 8000
-```
-Then navigate to `http://localhost:8000`
 
-Using Node.js:
-```bash
+# Using Node.js
 npx http-server
-```
 
-Using PHP:
-```bash
+# Using PHP
 php -S localhost:8000
 ```
 
-## CORS Considerations
+**Note**: Local development without Netlify CLI will encounter CORS errors when calling Ladbrokes APIs.
 
-The Ladbrokes APIs may have CORS restrictions. If you encounter CORS errors:
+## CORS Solution
 
-1. **Use a CORS proxy** (for development only):
-   - Add a proxy URL before the API endpoint
-   - Example: `https://cors-anywhere.herokuapp.com/`
+✅ **CORS is completely solved using Netlify Functions!**
 
-2. **Use browser extensions**:
-   - Install a CORS extension like "CORS Unblock" (Chrome/Edge)
-   - "CORS Everywhere" (Firefox)
+The app uses serverless functions that:
+- Run on Netlify's servers (not in the browser)
+- Make API requests server-side
+- Return data with proper CORS headers
+- Work perfectly in production without any configuration
 
-3. **Server-side proxy** (production recommended):
-   - Create a backend server that proxies requests
-   - This avoids CORS issues entirely
+No browser extensions or proxies needed!
 
 ## Technical Details
 
 ### File Structure
 ```
 merkur-specijal/
-├── index.html      # Main HTML structure
-├── styles.css      # Styling and animations
-├── app.js          # Application logic and API calls
-└── README.md       # This file
+├── index.html                      # Main HTML structure
+├── styles.css                      # Styling and animations
+├── app.js                          # Application logic and API calls
+├── package.json                    # Dependencies (node-fetch)
+├── netlify.toml                    # Netlify configuration
+├── netlify/
+│   └── functions/
+│       ├── get-events.js          # Serverless function for events API
+│       └── get-odds.js            # Serverless function for odds API
+└── README.md                       # This file
 ```
 
 ### Technologies Used

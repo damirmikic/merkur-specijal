@@ -1,6 +1,6 @@
-// API Endpoints
-const EVENTS_API = 'https://cms-prod.ladbrokes.com/cms/api/ladbrokes/fsc/16';
-const ODDS_API_BASE = 'https://ss-aka-ori.ladbrokes.com/openbet-ssviewer/Drilldown/2.86/EventToOutcomeForEvent/';
+// API Endpoints - Using Netlify Functions to bypass CORS
+const EVENTS_API = '/.netlify/functions/get-events';
+const ODDS_API_BASE = '/.netlify/functions/get-odds';
 
 // State
 let events = [];
@@ -68,8 +68,7 @@ async function loadEvents() {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
-            },
-            mode: 'cors'
+            }
         });
 
         if (!response.ok) {
@@ -203,14 +202,13 @@ async function loadOdds(eventId) {
     hideElement(oddsSection);
 
     try {
-        const oddsUrl = `${ODDS_API_BASE}${eventId}?scorecast=true&translationLang=en&responseFormat=json&referenceEachWayTerms=true`;
+        const oddsUrl = `${ODDS_API_BASE}?eventId=${eventId}`;
 
         const response = await fetch(oddsUrl, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
-            },
-            mode: 'cors'
+            }
         });
 
         if (!response.ok) {

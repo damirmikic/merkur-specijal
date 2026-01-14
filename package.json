@@ -1,0 +1,21 @@
+{
+  "name": "merkur-specijal-betting-app",
+  "version": "1.0.0",
+  "description": "Betting events and odds viewer using Ladbrokes API",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "betting",
+    "odds",
+    "ladbrokes",
+    "api",
+    "netlify"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
