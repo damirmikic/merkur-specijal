@@ -102,7 +102,21 @@ function parseEvents(data) {
     const eventsList = [];
 
     try {
-        // Handle different possible response structures
+        // Ladbrokes API specific structure: modules[].data[]
+        if (data.modules && Array.isArray(data.modules)) {
+            // Extract events from all modules
+            data.modules.forEach(module => {
+                if (module.data && Array.isArray(module.data)) {
+                    eventsList.push(...module.data);
+                }
+            });
+
+            if (eventsList.length > 0) {
+                return eventsList;
+            }
+        }
+
+        // Fallback: Handle other possible response structures
         if (data.events && Array.isArray(data.events)) {
             return data.events;
         }
@@ -113,14 +127,6 @@ function parseEvents(data) {
 
         if (Array.isArray(data)) {
             return data;
-        }
-
-        // Try to find events in nested structures
-        if (data.fixture_schedule_content) {
-            const content = data.fixture_schedule_content;
-            if (content.events) {
-                return Array.isArray(content.events) ? content.events : [content.events];
-            }
         }
 
         // If we can't parse it, return the whole data wrapped in array
@@ -153,10 +159,21 @@ function populateEventDropdown() {
         const option = document.createElement('option');
         const eventId = event.id || event.eventId || event.event_id;
         const eventName = event.name || event.title || event.event_name || `Event ${eventId}`;
-        const eventDate = event.date || event.start_time || event.startTime || '';
+        const eventDate = event.startTime || event.date || event.start_time || '';
+        const competition = event.typeName || event.className || '';
 
         option.value = eventId;
-        option.textContent = eventDate ? `${eventName} - ${formatDate(eventDate)}` : eventName;
+
+        // Build display text with competition and date
+        let displayText = eventName;
+        if (competition) {
+            displayText = `${eventName} (${competition})`;
+        }
+        if (eventDate) {
+            displayText += ` - ${formatDate(eventDate)}`;
+        }
+
+        option.textContent = displayText;
         option.dataset.event = JSON.stringify(event);
 
         eventSelect.appendChild(option);
@@ -268,12 +285,14 @@ function createEventInfo() {
     div.className = 'event-info';
 
     const name = currentEventData.name || currentEventData.title || 'Event';
-    const date = currentEventData.date || currentEventData.start_time || currentEventData.startTime;
-    const competition = currentEventData.competition || currentEventData.league || '';
+    const date = currentEventData.startTime || currentEventData.date || currentEventData.start_time;
+    const competition = currentEventData.typeName || currentEventData.className || currentEventData.competition || '';
+    const category = currentEventData.categoryName || '';
 
     div.innerHTML = `
         <h3>${name}</h3>
         ${date ? `<p><strong>Date:</strong> ${formatDate(date)}</p>` : ''}
+        ${category ? `<p><strong>Sport:</strong> ${category}</p>` : ''}
         ${competition ? `<p><strong>Competition:</strong> ${competition}</p>` : ''}
     `;
 
