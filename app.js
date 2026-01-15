@@ -406,7 +406,8 @@ function getMarketGroup(marketName) {
     if (name.includes('shot') && name.includes('target')) return 'Shots on Target';
     if (name.includes('shot')) return 'Total Shots';
     if (name.includes('assist')) return 'Assists';
-    if (name.includes('score') && name.includes('win')) return 'Score & Win'; // Player to Score and Team Win
+    // Handle "Player to Score and Team Win" separately or under Goals
+    if (name.includes('score') && name.includes('win') && name.includes('team')) return 'Score & Win';
     if (name.includes('goalscorer') || name.includes('score')) return 'Goalscorers';
     if (name.includes('card') || name.includes('shown')) return 'Cards';
     if (name.includes('offside')) return 'Offsides';
@@ -429,8 +430,20 @@ function renderGroupedMarkets(markets, playerName) {
         groups[groupName].push(market);
     });
 
-    // Define sort order for groups if needed, otherwise alphabetical
-    const sortOrder = ['Goalscorers', 'Score & Win', 'Shots on Target', 'Total Shots', 'Assists', 'Cards', 'Offsides', 'Fouls', 'Tackles', 'Passes', 'Other'];
+    // Define sort order for groups
+    const sortOrder = [
+        'Goalscorers', 
+        'Score & Win', 
+        'Shots on Target', 
+        'Total Shots', 
+        'Assists', 
+        'Cards', 
+        'Fouls', 
+        'Tackles', 
+        'Offsides', 
+        'Passes', 
+        'Other'
+    ];
 
     // Render groups in order
     sortOrder.forEach(groupName => {
@@ -513,55 +526,52 @@ function createOutcomeCard(outcome) {
 
 // === CSV LOGIC ===
 
-// Map English API terms to Croatian CSV terms based on requirements
+// Map English API terms to Croatian CSV terms
 function getMappedMarketName(apiMarketName, outcomeName) {
     const name = apiMarketName.toLowerCase();
     
-    // Player to Score and Team Win mapping
-    if (name.includes('score') && name.includes('team') && name.includes('win')) {
-        return 'Igrac daje gol i pobedjuje';
-    }
+    // GOALS
+    if (name.includes('hat trick')) return 'Postize 3 gola';
+    if (name.includes('score exactly 1')) return 'Daje tacno 1 gol';
+    if (name.includes('score exactly 2')) return 'Daje tacno 2 gola';
+    if (name.includes('score exactly 3')) return 'Daje tacno 3 gola'; // same as hat trick usually
+    if (name.includes('anytime goalscorer')) return 'Daje gol';
+    if (name.includes('score 2 or more')) return 'Daje 2+ golova';
+    if (name.includes('score 3 or more')) return 'Daje 3+ golova';
+    if (name.includes('score in both halves')) return 'Daje gol u oba pol.';
+    if (name.includes('score') && name.includes('team') && name.includes('win')) return 'Daje gol i pobedjuje';
 
-    // Offsides
-    if (name.includes('offside')) {
-         const match = name.match(/(\d+)/);
-         if(match) return `ukupno ofsajda ${match[1]}+`;
-         return 'ukupno ofsajda 1+';
-    }
-
-    // Cards
-    if (name.includes('to be carded') || name.includes('shown a card')) return 'igrac dobija karton';
-    if (name.includes('red card')) return 'igrac dobija crveni karton';
-    
-    // Assists
-    if (name.includes('assist')) return 'asistencija';
-    
-    // Shots
+    // SHOTS ON TARGET
     if (name.includes('shots on target')) {
+         // Check for specific line in the name
          const match = name.match(/(\d+)/);
-         const line = match ? match[1] : '1';
-         return `šutevi u okvir gola ${line}+`; 
+         if (match) {
+             const line = match[1];
+             return `Uk. suteva u okvir`; // CSV expects "Uk. suteva u okvir" in market col, line in selection
+         }
+         return 'Uk. suteva u okvir';
     }
     
+    // TOTAL SHOTS
     if (name.includes('shots') && !name.includes('target')) {
-         const match = name.match(/(\d+)/);
-         const line = match ? match[1] : '1';
-         // Requirement: "ukupno suteva {} -granica iz igre" (assuming line is the granica)
-         // But usually displayed as "ukupno suteva 2+"
-         return `ukupno šuteva ${line}+`;
+         return 'Uk. suteva';
     }
 
-    // Goalscorer mappings
-    if (name.includes('anytime goalscorer')) return 'daje gol';
-    if (name.includes('first goalscorer')) return 'prvi daje gol';
-    if (name.includes('last goalscorer')) return 'poslednji daje gol';
-    if (name.includes('2 or more')) return 'daje 2+ gola';
-    if (name.includes('3 or more') || name.includes('hat trick')) return 'daje 3+ gola';
-
-    // Stats generic
-    if (name.includes('foul')) return 'ukupno načinjenih faulova';
-    if (name.includes('pass')) return 'ukupno pasova';
-    if (name.includes('tackle')) return 'ukupno startova';
+    // ASSISTS
+    if (name.includes('assist')) return 'Asistencija';
+    
+    // CARDS
+    if (name.includes('to be carded') || name.includes('shown a card')) return 'Dobija karton';
+    if (name.includes('red card')) return 'Dobija crveni karton';
+    
+    // FOULS
+    if (name.includes('foul')) return 'Uk. faulova';
+    
+    // TACKLES
+    if (name.includes('tackle')) return 'Uk. startova';
+    
+    // OFFSIDES
+    if (name.includes('offside')) return 'Uk. ofsajda';
 
     // Default fallback
     return apiMarketName; 
@@ -577,21 +587,42 @@ function getMappedSelection(marketName, outcomeName) {
     if (oName === 'over') return 'Više';
     if (oName === 'under') return 'Manje';
 
-    // Handle "Exactly X"
-    const exactMatch = mName.match(/exactly\s+(\d+)/);
-    if (exactMatch) {
-        return exactMatch[1];
+    // Handle "Exactly X" -> DA
+    if (mName.includes('exactly')) return 'DA';
+    
+    // Handle "X or more" -> extract X and format as "X+"
+    const moreMatch = mName.match(/(\d+)\s+or\s+more/);
+    if (moreMatch) {
+        return `${moreMatch[1]}+`;
     }
     
-    // Handle "X or more" in market name -> implies "DA" for the player outcome
-    if (mName.includes('or more')) return 'DA';
+    // Handle "Hat trick" -> DA
+    if (mName.includes('hat trick')) return 'DA';
+
+    // Handle specific text mappings asked
+    // "Postize 3 gola" -> selection is "Postize 3 gola" based on user example, but usually selection is DA/NE.
+    // User wrote: "To Score a Hat-trick?- Postize 3 gola - Postize 3 gola, DA"
+    // Wait, the prompt says "Postize 3 gola - Postize 3 gola, DA". This implies MarketName is "Postize 3 gola" and Selection is "DA"? 
+    // Or MarketName is "Postize 3 gola" and selection is "Postize 3 gola"?
+    // Looking at other examples: "Anytime Goalscorer - Daje Gol- Daje gol, DA". 
+    // Format: "English Market - Translated Market - CSV Market Name, CSV Selection".
+    // So for hattrick: CSV Market="Postize 3 gola", CSV Selection="DA".
     
-    // Handle "Player to Score..." -> "DA"
-    if (mName.includes('to score')) return 'DA';
-    if (mName.includes('to be carded')) return 'DA';
+    // Goals
+    if (mName.includes('anytime goalscorer')) return 'DA';
+    if (mName.includes('score')) return 'DA'; // Covers "Score exactly", "Score 2+", "Score in both halves", "Score and win"
+
+    // Assists
     if (mName.includes('assist')) return 'DA';
 
-    return 'DA'; // Default active selection
+    // Cards
+    if (mName.includes('card')) return 'DA';
+
+    // Stats (Shots, Fouls, Tackles, Offsides) - Need to extract line from market name usually
+    // e.g. "Player to have 1 or more shots" -> Market "Uk. suteva", Selection "1+"
+    // The "or more" regex above handles this returns "1+".
+    
+    return 'DA'; // Default fallback
 }
 
 function addMarketToCSV(market, playerName, btnElement) {
@@ -612,11 +643,7 @@ function addMarketToCSV(market, playerName, btnElement) {
 
     const dateTime = formatDate(currentEventData.startTime || currentEventData.date);
 
-    // Filter relevant outcomes: only the one matching the player name OR all if generic market (like Yes/No)
-    // Actually, in the `filteredMarkets` step we usually narrowed down outcomes.
-    // However, `market.outcomes` might still contain all if we passed the full market.
-    // Let's filter again to be safe and only add the relevant line for THIS player.
-    
+    // Filter relevant outcomes
     const relevantOutcomes = market.outcomes.filter(o => 
         o.name.toLowerCase().includes(playerName.toLowerCase()) || 
         ['yes', 'no', 'over', 'under'].includes(o.name.toLowerCase())
